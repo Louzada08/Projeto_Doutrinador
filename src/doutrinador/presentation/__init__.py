@@ -1,0 +1,2 @@
+"""Camada de apresentação HTTP."""
+

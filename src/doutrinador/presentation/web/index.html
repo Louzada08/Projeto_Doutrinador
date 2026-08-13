@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Doutrinador</title>
+  <link rel="stylesheet" href="/assets/styles.css">
+  <link rel="stylesheet" href="/assets/edit.css">
+</head>
+<body>
+  <header class="hero">
+    <div class="mark">✦</div>
+    <div><p class="eyebrow">PROJETO DOUTRINADOR · VERSÃO 0.4 · FASTAPI</p><h1>Conhecimento com fundamento.</h1>
+    <p>Biblioteca e pesquisa responsável da Doutrina do Amanhecer.</p></div>
+    <span id="status" class="status">Verificando…</span>
+  </header>
+  <nav class="tabs" aria-label="Seções">
+    <button class="active" data-tab="perguntar">Perguntar</button>
+    <button data-tab="acervo">Acervo</button>
+    <button data-tab="cadastrar">Cadastrar fonte</button>
+    <button data-tab="api">Documentação da API</button>
+  </nav>
+  <main>
+    <section id="perguntar" class="panel active">
+      <div class="section-title"><span>01</span><div><h2>Perguntar ao Doutrinador</h2><p>A resposta será limitada às fontes atualmente cadastradas.</p></div></div>
+      <form id="ask-form" class="card">
+        <label for="question">Sua pergunta</label>
+        <textarea id="question" rows="4" required placeholder="Ex.: O que as fontes dizem sobre livre-arbítrio?"></textarea>
+        <button class="primary" type="submit">Pesquisar no acervo</button>
+      </form>
+      <div id="answer" class="result hidden"></div>
+    </section>
+    <section id="acervo" class="panel">
+      <div class="section-title"><span>02</span><div><h2>Acervo doutrinário</h2><p>Os documentos permanecem salvos mesmo após encerrar o servidor.</p></div></div>
+      <div id="documents" class="documents"></div>
+    </section>
+    <section id="cadastrar" class="panel">
+      <div class="section-title"><span>03</span><div><h2>Cadastrar uma fonte</h2><p>Classifique a procedência antes de incorporar o documento.</p></div></div>
+      <form id="document-form" class="card form-grid">
+        <label>Título<input name="title" required></label>
+        <label>Autoria<input name="author" required></label>
+        <label>Nível da fonte<select name="source_level"><option>A</option><option>B</option><option>C</option><option>D</option></select></label>
+        <label>Ano<input name="year" type="number" min="1800" max="2100"></label>
+        <label>Edição<input name="edition"></label>
+        <label>Origem<input name="origin"></label>
+        <label>Situação de autenticidade<select name="authenticity_status"><option>pendente</option><option>validado</option><option>contestado</option></select></label>
+        <label>Direitos/autorização<select name="rights_status"><option>não informado</option><option>autorizado</option><option>restrito</option></select></label>
+        <label class="wide">Observação de procedência<textarea name="provenance_note" rows="4" placeholder="Registre a origem, a cadeia de custódia, a relação com Tia Neiva e quem forneceu ou validou o documento."></textarea></label>
+        <label class="wide">Conteúdo<textarea name="content" rows="9" required placeholder="Cole aqui o texto autorizado, preservando o original."></textarea></label>
+        <button class="primary" type="submit">Salvar permanentemente</button>
+        <p id="document-message" class="message"></p>
+      </form>
+    </section>
+    <section id="editar" class="panel">
+      <div class="section-title"><span>05</span><div><h2>Editar metadados</h2><p>O conteúdo original não pode ser alterado por esta operação.</p></div></div>
+      <form id="edit-form" class="card form-grid">
+        <input type="hidden" name="id">
+        <label>Título<input name="title" required></label><label>Autoria<input name="author" required></label>
+        <label>Nível da fonte<select name="source_level"><option>A</option><option>B</option><option>C</option><option>D</option></select></label>
+        <label>Ano<input name="year" type="number" min="1800" max="2100"></label>
+        <label>Edição<input name="edition"></label><label>Origem<input name="origin"></label>
+        <label>Situação de autenticidade<select name="authenticity_status"><option>pendente</option><option>validado</option><option>contestado</option></select></label>
+        <label>Direitos/autorização<select name="rights_status"><option>não informado</option><option>autorizado</option><option>restrito</option></select></label>
+        <label class="wide">Observação de procedência<textarea name="provenance_note" rows="4"></textarea></label>
+        <div class="locked wide"><b>Conteúdo documental protegido</b><p>Esta edição altera somente metadados. O texto original permanece intacto.</p></div>
+        <label>Responsável pela alteração<input name="responsible" required></label>
+        <label>Justificativa<input name="justification" minlength="5" required></label>
+        <div class="wide"><button class="primary" type="submit">Salvar alteração</button><button class="secondary" type="button" id="cancel-edit">Cancelar</button></div>
+        <p id="edit-message" class="message wide"></p>
+      </form>
+      <div class="section-title history-title"><span>↺</span><div><h2>Histórico de alterações</h2><p>Registro permanente das mudanças realizadas nesta fonte.</p></div></div>
+      <div id="history" class="documents"></div>
+    </section>
+    <section id="api" class="panel">
+      <div class="section-title"><span>04</span><div><h2>Documentação interativa</h2><p>Consulte os contratos abaixo ou abra o Swagger completo.</p></div></div>
+      <p><a class="primary api-link" href="/docs" target="_blank">Abrir documentação Swagger</a> <a class="secondary api-link" href="/redoc" target="_blank">Abrir ReDoc</a></p>
+      <div class="api-grid">
+        <article class="endpoint"><b class="get">GET</b><code>/health</code><p>Estado do serviço e quantidade de documentos.</p><button data-try="health">Executar</button></article>
+        <article class="endpoint"><b class="get">GET</b><code>/documents</code><p>Lista completa do acervo cadastrado.</p><button data-try="documents">Executar</button></article>
+        <article class="endpoint"><b class="post">POST</b><code>/documents</code><p>Cadastra uma fonte classificada nos níveis A–D.</p></article>
+        <article class="endpoint"><b class="post">POST</b><code>/ask</code><p>Pesquisa no acervo e responde com citações.</p></article>
+        <article class="endpoint"><b class="put">PUT</b><code>/documents/{id}</code><p>Edita metadados com responsável e justificativa.</p></article>
+        <article class="endpoint"><b class="get">GET</b><code>/documents/{id}/history</code><p>Consulta o histórico auditável.</p></article>
+      </div>
+      <pre id="api-output">Selecione “Executar” para visualizar a resposta.</pre>
+    </section>
+  </main>
+  <footer>O Doutrinador não cria Doutrina. Primeiro pesquisa. Depois responde.</footer>
+  <script src="/assets/app.js"></script>
+</body>
+</html>

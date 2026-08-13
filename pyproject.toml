@@ -1,0 +1,12 @@
+[project]
+name = "doutrinador"
+version = "0.4.0"
+description = "IA de apoio ao estudo da Doutrina do Amanhecer"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.30,<1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
