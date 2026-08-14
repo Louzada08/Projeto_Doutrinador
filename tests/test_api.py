@@ -8,6 +8,7 @@ os.environ["DOUTRINADOR_DATABASE"] = str(Path(_temp.name) / "api.db")
 
 from fastapi.testclient import TestClient
 from doutrinador.presentation.api import app
+import doutrinador.presentation.api as api_module
 
 
 class ApiTests(unittest.TestCase):
@@ -97,6 +98,45 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="voice-help"',html)
         self.assertIn("SpeechRecognition",script)
         self.assertIn("SpeechSynthesisUtterance",script)
+        self.assertIn("MediaRecorder",script)
+        self.assertIn("window.isSecureContext",script)
+
+    def test_capacidades_de_voz_informam_endereco_https(self):
+        capabilities=self.client.get("/voice/capabilities")
+        self.assertEqual(capabilities.status_code,200)
+        self.assertEqual(capabilities.json()["https_url"],"https://192.168.10.105:8000")
+        self.assertEqual(capabilities.json()["vpn_https_url"],"https://10.66.66.1:8000")
+        self.assertEqual(capabilities.json()["language"],"pt-BR")
+
+    def test_audio_pode_ser_transcrito_sem_ser_armazenado(self):
+        class FakeTranscriber:
+            def __init__(self): self.received=None
+            def transcribe(self,filename,data,content_type):
+                self.received=(filename,data,content_type)
+                return "Qual é a orientação?"
+        original=api_module.transcriber; fake=FakeTranscriber(); api_module.transcriber=fake
+        try:
+            response=self.client.post(
+                "/voice/transcribe",content=b"audio-de-teste",
+                headers={"Content-Type":"audio/webm;codecs=opus"},
+            )
+        finally:
+            api_module.transcriber=original
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json()["text"],"Qual é a orientação?")
+        self.assertEqual(fake.received,("pergunta.webm",b"audio-de-teste","audio/webm"))
+
+    def test_transcricao_sem_provedor_falha_de_forma_explicita(self):
+        original=api_module.transcriber; api_module.transcriber=None
+        try:
+            response=self.client.post(
+                "/voice/transcribe",content=b"audio",
+                headers={"Content-Type":"audio/webm"},
+            )
+        finally:
+            api_module.transcriber=original
+        self.assertEqual(response.status_code,503)
+        self.assertIn("OPENAI_API_KEY",response.json()["detail"])
 
 
 if __name__ == "__main__": unittest.main()

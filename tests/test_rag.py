@@ -8,7 +8,8 @@ from doutrinador.application.services import INSUFFICIENT_EVIDENCE
 from doutrinador.constitution import DOUTRINADOR_CONSTITUTION
 from doutrinador.domain import Document, SourceLevel
 from doutrinador.infrastructure import (
-    InMemoryKnowledgeBase, OpenAIResponsesGenerator, SQLiteKnowledgeBase,
+    InMemoryKnowledgeBase, OpenAIResponsesGenerator, OpenAITranscriber,
+    SQLiteKnowledgeBase,
 )
 from doutrinador.infrastructure.chunking import chunk_document
 
@@ -45,6 +46,18 @@ class FakeResponses:
 class FakeOpenAIClient:
     def __init__(self):
         self.responses = FakeResponses()
+
+
+class FakeTranscriptions:
+    def __init__(self): self.arguments = None
+    def create(self, **kwargs):
+        self.arguments = kwargs
+        return type("Transcription", (), {"text": "Pergunta transcrita"})()
+
+
+class FakeAudioClient:
+    def __init__(self):
+        self.audio = type("Audio", (), {"transcriptions": FakeTranscriptions()})()
 
 
 class RagTests(unittest.TestCase):
@@ -96,6 +109,16 @@ class RagTests(unittest.TestCase):
         self.assertEqual(client.responses.arguments["model"], "modelo-de-teste")
         self.assertIn(passages[0].passage.text, client.responses.arguments["input"])
         self.assertNotIn("tools", client.responses.arguments)
+
+    def test_transcricao_openai_envia_audio_em_portugues(self):
+        client = FakeAudioClient()
+        transcriber = OpenAITranscriber(model="modelo-transcricao", client=client)
+        text = transcriber.transcribe("pergunta.webm", b"audio", "audio/webm")
+        self.assertEqual(text, "Pergunta transcrita")
+        arguments = client.audio.transcriptions.arguments
+        self.assertEqual(arguments["model"], "modelo-transcricao")
+        self.assertEqual(arguments["language"], "pt")
+        self.assertEqual(arguments["file"], ("pergunta.webm", b"audio", "audio/webm"))
 
     def test_citacao_inexistente_produz_abstencao(self):
         base = InMemoryKnowledgeBase()
