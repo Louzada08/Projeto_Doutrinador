@@ -1,0 +1,17 @@
+[
+  {
+    "question": "Como o livre-arbítrio se relaciona com as escolhas?",
+    "grounded": true,
+    "expected_terms": ["responsabilidade", "escolhas"]
+  },
+  {
+    "question": "Que atitude deve acompanhar a caridade?",
+    "grounded": true,
+    "expected_terms": ["humildade"]
+  },
+  {
+    "question": "Qual é a explicação doutrinária para a formação das galáxias?",
+    "grounded": false,
+    "expected_terms": []
+  }
+]

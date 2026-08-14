@@ -49,11 +49,25 @@ class SQLiteKnowledgeBaseTests(unittest.TestCase):
             migrated = SQLiteKnowledgeBase(path)
             self.assertEqual(len(migrated.list()), 1)
             self.assertIsNone(migrated.list()[0].provenance_note)
+            self.assertIsNone(migrated.list()[0].image_url)
             migrated.add(Document(
                 "Novo", "Autor", SourceLevel.C, "Texto", provenance_note="Acervo familiar"
             ))
             new_document = next(item for item in migrated.list() if item.title == "Novo")
             self.assertEqual(new_document.provenance_note, "Acervo familiar")
+
+    def test_imagem_e_descricao_permanecem_nos_trechos(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = SQLiteKnowledgeBase(Path(directory) / "imagem.db")
+            document = Document(
+                "Fonte ilustrada", "Autoria", SourceLevel.A, "Trecho ilustrado.",
+                image_url="https://acervo.example.org/fonte.jpg",
+                image_description="Descrição acessível da fonte.",
+            )
+            base.add(document)
+            passage = base.passages_for_document(document.id)[0]
+            self.assertEqual(passage.image_url, document.image_url)
+            self.assertEqual(passage.image_description, document.image_description)
 
     def test_edicao_registra_historico_e_preserva_conteudo(self):
         with tempfile.TemporaryDirectory() as directory:

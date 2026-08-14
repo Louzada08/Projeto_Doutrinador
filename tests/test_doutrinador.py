@@ -31,6 +31,13 @@ class DoutrinadorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             Document("Título", "Autor", SourceLevel.B, "  ")
 
+    def test_documento_rejeita_protocolo_de_imagem_inseguro(self):
+        with self.assertRaises(ValueError):
+            Document(
+                "Título", "Autor", SourceLevel.B, "Conteúdo",
+                image_url="file:///segredo.jpg",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

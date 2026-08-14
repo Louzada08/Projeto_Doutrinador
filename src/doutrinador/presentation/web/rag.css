@@ -1,0 +1,141 @@
+.generated-answer {
+  white-space: pre-wrap;
+}
+
+.source-link {
+  margin-top: 12px;
+  border: 1px solid var(--ink);
+  background: white;
+  color: var(--ink);
+  border-radius: 5px;
+  padding: 8px 12px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.source-dialog {
+  width: min(760px, calc(100% - 32px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 28px;
+  color: var(--ink);
+}
+
+.source-dialog::backdrop {
+  background: #0d252cbb;
+}
+
+.source-dialog h2 {
+  margin-top: 0;
+}
+
+.source-dialog .eyebrow {
+  color: var(--gold) !important;
+}
+
+.dialog-close {
+  float: right;
+  border: 0;
+  background: none;
+  font-size: 30px;
+  cursor: pointer;
+}
+
+.source-text {
+  max-height: 55vh;
+  background: var(--paper);
+  color: #26373b;
+  border: 1px solid var(--line);
+  font: 16px/1.6 Georgia, serif;
+}
+
+.card small {
+  font-weight: normal;
+  color: var(--muted);
+}
+
+.voice-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.voice-button {
+  border: 1px solid var(--ink);
+  background: #fff;
+  color: var(--ink);
+  border-radius: 999px;
+  padding: 10px 16px;
+  font: 700 15px Calibri, sans-serif;
+  cursor: pointer;
+}
+
+.voice-button:hover,
+.voice-button:focus-visible {
+  outline: 3px solid #d4b875;
+  outline-offset: 2px;
+}
+
+.voice-button:disabled {
+  cursor: not-allowed;
+  opacity: .55;
+}
+
+.voice-button.listening {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+  animation: voice-pulse 1.2s infinite;
+}
+
+.listen-answer {
+  float: right;
+  margin-left: 16px;
+}
+
+#voice-status {
+  color: var(--muted);
+  font-weight: bold;
+}
+
+.document-image,
+.citation-image,
+.source-image {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.document-image {
+  max-width: 260px;
+  max-height: 180px;
+  float: right;
+  margin: 0 0 14px 18px;
+}
+
+.citation-image {
+  max-width: 320px;
+  max-height: 220px;
+  margin-bottom: 12px;
+}
+
+.source-image {
+  margin: 12px 0;
+}
+
+@keyframes voice-pulse {
+  50% { box-shadow: 0 0 0 7px #9c3e3e33; }
+}
+
+@media (max-width: 700px) {
+  .voice-actions { align-items: stretch; flex-direction: column; }
+  .voice-button { width: 100%; }
+  .listen-answer { float: none; margin: 0 0 12px; }
+  .document-image { float: none; max-width: 100%; margin: 0 0 14px; }
+}

@@ -2,16 +2,24 @@ from __future__ import annotations
 
 import sqlite3
 import json
+from dataclasses import asdict
 from contextlib import closing
 from pathlib import Path
 from threading import RLock
+from typing import Sequence
 
-from doutrinador.application.ports import DocumentRepository, KnowledgeRetriever, SearchResult
-from doutrinador.domain import Document, SourceLevel
-from doutrinador.infrastructure.memory import _passages, _tokens
+from doutrinador.application.ports import (
+    DocumentRepository, InteractionLogger, KnowledgeRetriever, PassageRepository,
+    SearchResult,
+)
+from doutrinador.domain import Answer, Document, Passage, SourceLevel
+from doutrinador.infrastructure.chunking import chunk_document
+from doutrinador.infrastructure.retrieval import hybrid_search
 
 
-class SQLiteKnowledgeBase(DocumentRepository, KnowledgeRetriever):
+class SQLiteKnowledgeBase(
+    DocumentRepository, KnowledgeRetriever, PassageRepository, InteractionLogger
+):
     """Acervo persistente baseado apenas na biblioteca padrão do Python."""
 
     def __init__(self, database_path: str | Path) -> None:
@@ -41,6 +49,8 @@ class SQLiteKnowledgeBase(DocumentRepository, KnowledgeRetriever):
                     provenance_note TEXT,
                     authenticity_status TEXT NOT NULL,
                     rights_status TEXT NOT NULL,
+                    image_url TEXT,
+                    image_description TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """)
@@ -51,6 +61,46 @@ class SQLiteKnowledgeBase(DocumentRepository, KnowledgeRetriever):
                     connection.execute(
                         "ALTER TABLE documents ADD COLUMN provenance_note TEXT"
                     )
+                if "image_url" not in columns:
+                    connection.execute("ALTER TABLE documents ADD COLUMN image_url TEXT")
+                if "image_description" not in columns:
+                    connection.execute(
+                        "ALTER TABLE documents ADD COLUMN image_description TEXT"
+                    )
+                connection.execute("""
+                    CREATE TABLE IF NOT EXISTS passages (
+                        id TEXT PRIMARY KEY,
+                        document_id TEXT NOT NULL,
+                        ordinal INTEGER NOT NULL,
+                        section TEXT,
+                        page INTEGER,
+                        text TEXT NOT NULL,
+                        FOREIGN KEY(document_id) REFERENCES documents(id),
+                        UNIQUE(document_id, ordinal)
+                    )
+                """)
+                connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_passages_document ON passages(document_id, ordinal)"
+                )
+                connection.execute("""
+                    CREATE TABLE IF NOT EXISTS interactions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        question TEXT NOT NULL,
+                        passages_json TEXT NOT NULL,
+                        response TEXT NOT NULL,
+                        grounded INTEGER NOT NULL,
+                        observation TEXT,
+                        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                missing = connection.execute("""
+                    SELECT d.* FROM documents d
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM passages p WHERE p.document_id = d.id
+                    )
+                """).fetchall()
+                for row in missing:
+                    self._index_document(connection, self._to_document(row))
                 connection.execute("""
                     CREATE TABLE IF NOT EXISTS document_changes (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -72,14 +122,16 @@ class SQLiteKnowledgeBase(DocumentRepository, KnowledgeRetriever):
                 INSERT INTO documents (
                     id, title, author, source_level, content, year, edition, origin,
                     provenance_note,
-                    authenticity_status, rights_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    authenticity_status, rights_status, image_url, image_description
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     document.id, document.title, document.author, document.source_level.value,
                     document.content, document.year, document.edition, document.origin,
                     document.provenance_note,
                     document.authenticity_status, document.rights_status,
+                    document.image_url, document.image_description,
                 ))
+                self._index_document(connection, document)
 
     def list(self) -> list[Document]:
         with closing(self._connect()) as connection:
@@ -105,6 +157,7 @@ class SQLiteKnowledgeBase(DocumentRepository, KnowledgeRetriever):
         allowed = {
             "title", "author", "source_level", "year", "edition", "origin",
             "provenance_note", "authenticity_status", "rights_status",
+            "image_url", "image_description",
         }
         changes = {key: value for key, value in changes.items() if key in allowed}
         old = {key: getattr(document, key) for key in changes}
@@ -153,20 +206,100 @@ class SQLiteKnowledgeBase(DocumentRepository, KnowledgeRetriever):
             "changed_at": row["changed_at"],
         } for row in rows]
 
-    def search(self, question: str, limit: int = 3) -> list[SearchResult]:
-        query = _tokens(question)
-        if not query:
-            return []
-        precedence = {"A": 1.0, "B": 0.92, "C": 0.82, "D": 0.68}
-        ranked: list[SearchResult] = []
-        for document in self.list():
-            for excerpt in _passages(document.content):
-                found = query & _tokens(excerpt)
-                if found:
-                    score = (len(found) / len(query)) * precedence[document.source_level.value]
-                    ranked.append(SearchResult(document, excerpt, score))
-        ranked.sort(key=lambda item: item.score, reverse=True)
-        return ranked[:limit]
+    def search(self, question: str, limit: int = 5) -> list[SearchResult]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute("""
+                SELECT p.id AS passage_id, p.ordinal, p.section, p.page, p.text,
+                       d.*
+                FROM passages p JOIN documents d ON d.id = p.document_id
+                ORDER BY d.created_at, p.ordinal
+            """).fetchall()
+        items = [(self._to_document(row), self._to_passage(row)) for row in rows]
+        return hybrid_search(question, items, limit)
+
+    def get_passage(self, passage_id: str) -> Passage | None:
+        with closing(self._connect()) as connection:
+            row = connection.execute("""
+                SELECT p.id AS passage_id, p.ordinal, p.section, p.page, p.text,
+                       d.*
+                FROM passages p JOIN documents d ON d.id = p.document_id
+                WHERE p.id = ?
+            """, (passage_id,)).fetchone()
+        return self._to_passage(row) if row else None
+
+    def passages_for_document(self, document_id: str) -> list[Passage]:
+        if self.get(document_id) is None:
+            raise ValueError("Fonte não encontrada.")
+        with closing(self._connect()) as connection:
+            rows = connection.execute("""
+                SELECT p.id AS passage_id, p.ordinal, p.section, p.page, p.text,
+                       d.*
+                FROM passages p JOIN documents d ON d.id = p.document_id
+                WHERE d.id = ? ORDER BY p.ordinal
+            """, (document_id,)).fetchall()
+        return [self._to_passage(row) for row in rows]
+
+    def record_interaction(
+        self, question: str, passages: Sequence[SearchResult], answer: Answer
+    ) -> int:
+        consulted = [
+            {
+                **asdict(item.passage),
+                "source_level": item.passage.source_level.value,
+                "score": item.score,
+                "lexical_score": item.lexical_score,
+                "semantic_score": item.semantic_score,
+            }
+            for item in passages
+        ]
+        with self._lock, closing(self._connect()) as connection:
+            with connection:
+                cursor = connection.execute("""
+                    INSERT INTO interactions
+                    (question, passages_json, response, grounded, observation)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    question, json.dumps(consulted, ensure_ascii=False), answer.answer,
+                    int(answer.grounded), answer.observation,
+                ))
+                return int(cursor.lastrowid)
+
+    def list_interactions(self, limit: int = 100) -> list[dict]:
+        with closing(self._connect()) as connection:
+            rows = connection.execute("""
+                SELECT * FROM interactions ORDER BY created_at DESC, id DESC LIMIT ?
+            """, (max(1, min(limit, 1000)),)).fetchall()
+        return [{
+            "id": row["id"],
+            "question": row["question"],
+            "passages": json.loads(row["passages_json"]),
+            "response": row["response"],
+            "grounded": bool(row["grounded"]),
+            "observation": row["observation"],
+            "created_at": row["created_at"],
+        } for row in rows]
+
+    @staticmethod
+    def _index_document(connection: sqlite3.Connection, document: Document) -> None:
+        for passage in chunk_document(document):
+            connection.execute("""
+                INSERT OR IGNORE INTO passages
+                (id, document_id, ordinal, section, page, text)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                passage.id, passage.document_id, passage.ordinal,
+                passage.section, passage.page, passage.text,
+            ))
+
+    @staticmethod
+    def _to_passage(row: sqlite3.Row) -> Passage:
+        return Passage(
+            id=row["passage_id"], document_id=row["id"], title=row["title"],
+            author=row["author"], source_level=SourceLevel(row["source_level"]),
+            text=row["text"], ordinal=row["ordinal"], section=row["section"],
+            page=row["page"],
+            image_url=row["image_url"], image_description=row["image_description"],
+        )
 
     @staticmethod
     def _to_document(row: sqlite3.Row) -> Document:
@@ -176,4 +309,5 @@ class SQLiteKnowledgeBase(DocumentRepository, KnowledgeRetriever):
             year=row["year"], edition=row["edition"], origin=row["origin"],
             provenance_note=row["provenance_note"],
             authenticity_status=row["authenticity_status"], rights_status=row["rights_status"],
+            image_url=row["image_url"], image_description=row["image_description"],
         )

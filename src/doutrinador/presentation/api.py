@@ -10,8 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from doutrinador import __version__
 from doutrinador.application import AskDoutrinador, RegisterDocument, UpdateDocumentMetadata
-from doutrinador.domain import Document, SourceLevel
-from doutrinador.infrastructure import SQLiteKnowledgeBase
+from doutrinador.domain import Document, SourceLevel, validate_image_url
+from doutrinador.infrastructure import SQLiteKnowledgeBase, configured_answer_generator
 
 
 PROJECT = Path(__file__).resolve().parents[3]
@@ -19,7 +19,8 @@ WEB = Path(__file__).resolve().parent / "web"
 database_path = Path(os.getenv("DOUTRINADOR_DATABASE", str(PROJECT / "data" / "doutrinador.db")))
 knowledge_base = SQLiteKnowledgeBase(database_path)
 register_document = RegisterDocument(knowledge_base)
-ask_doutrinador = AskDoutrinador(knowledge_base)
+answer_generator = configured_answer_generator()
+ask_doutrinador = AskDoutrinador(knowledge_base, answer_generator, knowledge_base)
 update_document = UpdateDocumentMetadata(knowledge_base)
 
 
@@ -35,6 +36,13 @@ class DocumentCreate(BaseModel):
     provenance_note: str | None = Field(default=None, max_length=5000)
     authenticity_status: Literal["pendente", "validado", "contestado"] = "pendente"
     rights_status: Literal["não informado", "autorizado", "restrito"] = "não informado"
+    image_url: str | None = Field(default=None, max_length=2000)
+    image_description: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("image_url")
+    @classmethod
+    def image_must_be_web_url(cls, value: str | None) -> str | None:
+        return validate_image_url(value)
 
 
 class AskRequest(BaseModel):
@@ -52,6 +60,13 @@ class MetadataChanges(BaseModel):
     provenance_note: str | None = Field(default=None, max_length=5000)
     authenticity_status: Literal["pendente", "validado", "contestado"] | None = None
     rights_status: Literal["não informado", "autorizado", "restrito"] | None = None
+    image_url: str | None = Field(default=None, max_length=2000)
+    image_description: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("image_url")
+    @classmethod
+    def image_must_be_web_url(cls, value: str | None) -> str | None:
+        return validate_image_url(value)
 
 
 class MetadataUpdate(BaseModel):
@@ -84,6 +99,7 @@ def health() -> dict:
     return {
         "status": "ok", "service": "Doutrinador", "version": __version__,
         "framework": "FastAPI", "storage": "sqlite", "documents": len(knowledge_base.list()),
+        "answer_mode": type(answer_generator).__name__,
     }
 
 
@@ -107,6 +123,26 @@ def get_document(document_id: str) -> dict:
     if document is None:
         raise HTTPException(status_code=404, detail="Fonte não encontrada.")
     return asdict(document)
+
+
+@app.get(
+    "/documents/{document_id}/passages",
+    tags=["Acervo"],
+    summary="Listar trechos indexados de uma fonte",
+)
+def document_passages(document_id: str) -> list[dict]:
+    try:
+        return [asdict(item) for item in knowledge_base.passages_for_document(document_id)]
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/passages/{passage_id}", tags=["Pesquisa"], summary="Abrir o trecho exato citado")
+def get_passage(passage_id: str) -> dict:
+    passage = knowledge_base.get_passage(passage_id)
+    if passage is None:
+        raise HTTPException(status_code=404, detail="Trecho não encontrado.")
+    return asdict(passage)
 
 
 @app.put("/documents/{document_id}", tags=["Governança"], summary="Editar metadados")
@@ -136,6 +172,11 @@ def ask(payload: AskRequest) -> dict:
         return asdict(ask_doutrinador.execute(payload.question))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/interactions", tags=["Governança"], summary="Consultar auditoria de perguntas")
+def interactions(limit: int = 100) -> list[dict]:
+    return knowledge_base.list_interactions(limit)
 
 
 def run() -> None:
