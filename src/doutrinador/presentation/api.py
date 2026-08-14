@@ -3,7 +3,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from doutrinador import __version__
 from doutrinador.application import AskDoutrinador, RegisterDocument, UpdateDocumentMetadata
 from doutrinador.domain import Document, SourceLevel, validate_image_url
-from doutrinador.infrastructure import SQLiteKnowledgeBase, configured_answer_generator
+from doutrinador.infrastructure import (
+    SQLiteKnowledgeBase, configured_answer_generator, configured_transcriber,
+)
 
 
 PROJECT = Path(__file__).resolve().parents[3]
@@ -22,6 +24,11 @@ register_document = RegisterDocument(knowledge_base)
 answer_generator = configured_answer_generator()
 ask_doutrinador = AskDoutrinador(knowledge_base, answer_generator, knowledge_base)
 update_document = UpdateDocumentMetadata(knowledge_base)
+transcriber = configured_transcriber()
+MAX_AUDIO_BYTES = 15 * 1024 * 1024
+ALLOWED_AUDIO_TYPES = {
+    "audio/mp4", "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/x-m4a",
+}
 
 
 class DocumentCreate(BaseModel):
@@ -100,6 +107,7 @@ def health() -> dict:
         "status": "ok", "service": "Doutrinador", "version": __version__,
         "framework": "FastAPI", "storage": "sqlite", "documents": len(knowledge_base.list()),
         "answer_mode": type(answer_generator).__name__,
+        "server_transcription": transcriber is not None,
     }
 
 
@@ -172,6 +180,57 @@ def ask(payload: AskRequest) -> dict:
         return asdict(ask_doutrinador.execute(payload.question))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/voice/capabilities", tags=["Acessibilidade"], summary="Verificar recursos de voz")
+def voice_capabilities() -> dict:
+    return {
+        "server_transcription": transcriber is not None,
+        "max_audio_bytes": MAX_AUDIO_BYTES,
+        "language": "pt-BR",
+        "https_url": (
+            f"https://{os.getenv('DOUTRINADOR_HTTPS_IP', '192.168.10.105')}:"
+            f"{os.getenv('DOUTRINADOR_PORT', '8000')}"
+        ),
+        "vpn_https_url": (
+            f"https://{os.getenv('DOUTRINADOR_VPN_IP', '10.66.66.1')}:"
+            f"{os.getenv('DOUTRINADOR_PORT', '8000')}"
+        ),
+    }
+
+
+@app.post("/voice/transcribe", tags=["Acessibilidade"], summary="Transcrever pergunta falada")
+async def transcribe_voice(request: Request) -> dict:
+    if transcriber is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Transcrição no servidor indisponível. Configure "
+                "DOUTRINADOR_TRANSCRIPTION_API_KEY ou OPENAI_API_KEY."
+            ),
+        )
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].casefold()
+    if content_type not in ALLOWED_AUDIO_TYPES:
+        raise HTTPException(status_code=415, detail="Formato de áudio não suportado.")
+    buffer = bytearray()
+    async for chunk in request.stream():
+        buffer.extend(chunk)
+        if len(buffer) > MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=413, detail="A gravação excede 15 MB.")
+    data = bytes(buffer)
+    if not data:
+        raise HTTPException(status_code=400, detail="A gravação está vazia.")
+    extensions = {
+        "audio/mp4": ".m4a", "audio/mpeg": ".mp3", "audio/ogg": ".ogg",
+        "audio/wav": ".wav", "audio/webm": ".webm", "audio/x-m4a": ".m4a",
+    }
+    filename = f"pergunta{extensions[content_type]}"
+    try:
+        return {"text": transcriber.transcribe(filename, data, content_type)}
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail="Não foi possível transcrever a gravação."
+        ) from exc
 
 
 @app.get("/interactions", tags=["Governança"], summary="Consultar auditoria de perguntas")

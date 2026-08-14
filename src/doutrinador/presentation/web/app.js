@@ -249,7 +249,30 @@ $('#voice-help').onclick = () => speakText(
 );
 
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (Recognition) {
+
+function submitVoiceTranscript(transcript) {
+  const cleaned = transcript.trim();
+  if (!cleaned) {
+    reportVoiceError('Nenhuma fala foi reconhecida. Tente novamente.');
+    return;
+  }
+  $('#question').value = cleaned;
+  $('#voice-status').textContent = `Pergunta reconhecida: ${cleaned}`;
+  speakNextAnswer = true;
+  $('#ask-form').requestSubmit();
+}
+
+function reportVoiceError(message) {
+  speakNextAnswer = false;
+  $('#voice-status').textContent = message;
+  speakText(message);
+}
+
+if (!window.isSecureContext) {
+  $('#voice-question').disabled = true;
+  $('#voice-question').title = 'O microfone exige acesso HTTPS.';
+  $('#voice-status').textContent = 'Para usar o microfone, acesse pelo endereço HTTPS.';
+} else if (Recognition) {
   const recognition = new Recognition();
   recognition.lang = 'pt-BR';
   recognition.interimResults = false;
@@ -259,11 +282,7 @@ if (Recognition) {
     $('#voice-status').textContent = 'Ouvindo. Faça sua pergunta agora.';
   };
   recognition.onresult = event => {
-    const transcript = event.results[0][0].transcript;
-    $('#question').value = transcript;
-    $('#voice-status').textContent = `Pergunta reconhecida: ${transcript}`;
-    speakNextAnswer = true;
-    $('#ask-form').requestSubmit();
+    submitVoiceTranscript(event.results[0][0].transcript);
   };
   recognition.onerror = event => {
     speakNextAnswer = false;
@@ -272,9 +291,7 @@ if (Recognition) {
       'no-speech': 'Nenhuma fala foi reconhecida. Tente novamente.',
       'audio-capture': 'Nenhum microfone foi encontrado.',
     };
-    const message = messages[event.error] || 'Não foi possível reconhecer a fala.';
-    $('#voice-status').textContent = message;
-    speakText(message);
+    reportVoiceError(messages[event.error] || 'Não foi possível reconhecer a fala.');
   };
   recognition.onend = () => $('#voice-question').classList.remove('listening');
   $('#voice-question').onclick = () => {
@@ -286,10 +303,76 @@ if (Recognition) {
       $('#voice-status').textContent = 'O microfone já está sendo iniciado.';
     }
   };
+} else if (navigator.mediaDevices?.getUserMedia && window.MediaRecorder) {
+  let recorder = null;
+  let recordingStream = null;
+  let recordingChunks = [];
+  let recordingTimeout = null;
+
+  const resetRecordingButton = () => {
+    $('#voice-question').classList.remove('listening');
+    $('#voice-question').textContent = '🎙️ Fazer pergunta por voz';
+  };
+
+  const stopRecording = () => {
+    if (recorder?.state === 'recording') recorder.stop();
+  };
+
+  const startRecording = async () => {
+    try {
+      window.speechSynthesis?.cancel();
+      recordingStream = await navigator.mediaDevices.getUserMedia({audio: true});
+      recordingChunks = [];
+      recorder = new MediaRecorder(recordingStream);
+      recorder.ondataavailable = event => {
+        if (event.data.size) recordingChunks.push(event.data);
+      };
+      recorder.onerror = () => reportVoiceError('Não foi possível gravar o áudio.');
+      recorder.onstop = async () => {
+        clearTimeout(recordingTimeout);
+        recordingStream?.getTracks().forEach(track => track.stop());
+        resetRecordingButton();
+        const audio = new Blob(recordingChunks, {type: recorder.mimeType || 'audio/webm'});
+        $('#voice-status').textContent = 'Transcrevendo a pergunta…';
+        try {
+          const result = await api('/voice/transcribe', {
+            method: 'POST',
+            headers: {'Content-Type': audio.type || 'audio/webm'},
+            body: audio,
+          });
+          submitVoiceTranscript(result.text);
+        } catch (error) {
+          reportVoiceError(error.message);
+        }
+      };
+      recorder.start();
+      $('#voice-question').classList.add('listening');
+      $('#voice-question').textContent = '⏹️ Parar e enviar';
+      $('#voice-status').textContent = 'Ouvindo. Fale e pressione novamente para enviar.';
+      recordingTimeout = setTimeout(stopRecording, 15000);
+    } catch (error) {
+      recordingStream?.getTracks().forEach(track => track.stop());
+      resetRecordingButton();
+      const message = error.name === 'NotAllowedError'
+        ? 'Permissão para o microfone negada.'
+        : 'Nenhum microfone disponível.';
+      reportVoiceError(message);
+    }
+  };
+
+  $('#voice-question').onclick = () => {
+    if (recorder?.state === 'recording') stopRecording(); else startRecording();
+  };
+
+  api('/voice/capabilities').then(capabilities => {
+    if (!capabilities.server_transcription) {
+      $('#voice-status').textContent = 'Este navegador usará a transcrição do servidor; configure a chave de transcrição.';
+    }
+  }).catch(() => {});
 } else {
   $('#voice-question').disabled = true;
-  $('#voice-question').title = 'Reconhecimento de voz indisponível neste navegador.';
-  $('#voice-status').textContent = 'O navegador não oferece perguntas por voz.';
+  $('#voice-question').title = 'Captura de áudio indisponível neste navegador.';
+  $('#voice-status').textContent = 'O navegador não oferece captura de áudio.';
 }
 
 function safeImageUrl(value) {
