@@ -5,7 +5,9 @@ let lastAnswerSpeech = '';
 let speakNextAnswer = false;
 
 async function api(path, options = {}) {
-  const response = await fetch(path, options);
+  const base = (window.API_BASE || '').replace(/\/$/, '');
+  const url = base + path;
+  const response = await fetch(url, options);
   let data;
   try {
     data = await response.json();

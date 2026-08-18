@@ -41,7 +41,7 @@ class DocumentRepository(ABC):
 
 class KnowledgeRetriever(ABC):
     @abstractmethod
-    def search(self, question: str, limit: int = 3) -> list[SearchResult]: ...
+    def search(self, question: str, limit: int = 7) -> list[SearchResult]: ...
 
 
 class PassageRepository(ABC):
