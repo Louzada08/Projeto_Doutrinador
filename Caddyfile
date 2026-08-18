@@ -1,0 +1,13 @@
+{
+  email admin@seu-dominio.com
+}
+
+seu-dominio.com {
+  reverse_proxy app:8000
+}
+
+:80 {
+  respond 301 {
+    Location https://seu-dominio.com{uri}
+  }
+}

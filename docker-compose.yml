@@ -1,0 +1,39 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    container_name: doutrinador-app
+    restart: unless-stopped
+    environment:
+      DOUTRINADOR_HOST: 0.0.0.0
+      DOUTRINADOR_PORT: 8000
+      DOUTRINADOR_PUBLIC_URL: ${DOUTRINADOR_PUBLIC_URL:-https://seu-dominio.com}
+      DOUTRINADOR_ALLOWED_ORIGINS: ${DOUTRINADOR_ALLOWED_ORIGINS:-https://seu-dominio.com}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DOUTRINADOR_TRANSCRIPTION_API_KEY: ${DOUTRINADOR_TRANSCRIPTION_API_KEY:-}
+      DOUTRINADOR_LLM_MODEL: ${DOUTRINADOR_LLM_MODEL:-}
+      DOUTRINADOR_DATABASE: /data/doutrinador.db
+    volumes:
+      - doutrinador_data:/data
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2.8-alpine
+    container_name: doutrinador-caddy
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  doutrinador_data:
+  caddy_data:
+  caddy_config:
