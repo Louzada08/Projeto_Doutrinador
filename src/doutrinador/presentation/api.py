@@ -6,6 +6,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from doutrinador import __version__
@@ -94,6 +95,19 @@ app = FastAPI(
     openapi_url="/openapi.json",
 )
 app.mount("/assets", StaticFiles(directory=WEB), name="assets")
+
+# Optional CORS configuration: set DOUTRINADOR_ALLOWED_ORIGINS to a comma-separated
+# list of allowed origins (e.g. https://example.com). If set, CORS middleware is added.
+allowed = os.getenv("DOUTRINADOR_ALLOWED_ORIGINS", "").strip()
+if allowed:
+    origins = [o.strip() for o in allowed.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
+    )
 
 
 @app.get("/", include_in_schema=False)
@@ -184,17 +198,20 @@ def ask(payload: AskRequest) -> dict:
 
 @app.get("/voice/capabilities", tags=["Acessibilidade"], summary="Verificar recursos de voz")
 def voice_capabilities() -> dict:
+    port = os.getenv("DOUTRINADOR_PORT", "8000")
+    lan_ip = os.getenv("DOUTRINADOR_HTTPS_IP", "192.168.10.105")
+    vpn_ip = os.getenv("DOUTRINADOR_VPN_IP", "10.66.66.1")
     return {
         "server_transcription": transcriber is not None,
         "max_audio_bytes": MAX_AUDIO_BYTES,
         "language": "pt-BR",
         "https_url": (
-            f"https://{os.getenv('DOUTRINADOR_HTTPS_IP', '192.168.10.105')}:"
-            f"{os.getenv('DOUTRINADOR_PORT', '8000')}"
+            os.getenv("DOUTRINADOR_PUBLIC_URL") or
+            f"https://{lan_ip}:{port}"
         ),
         "vpn_https_url": (
-            f"https://{os.getenv('DOUTRINADOR_VPN_IP', '10.66.66.1')}:"
-            f"{os.getenv('DOUTRINADOR_PORT', '8000')}"
+            os.getenv("DOUTRINADOR_VPN_PUBLIC_URL") or
+            f"https://{vpn_ip}:{port}"
         ),
     }
 
@@ -242,7 +259,7 @@ def run() -> None:
     import uvicorn
     uvicorn.run(
         "doutrinador.presentation.api:app",
-        host=os.getenv("DOUTRINADOR_HOST", "127.0.0.1"),
+        host=os.getenv("DOUTRINADOR_HOST", "0.0.0.0"),
         port=int(os.getenv("DOUTRINADOR_PORT", "8000")),
         reload=False,
     )
